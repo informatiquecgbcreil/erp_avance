@@ -29,6 +29,44 @@ class User(db.Model):
         return check_password_hash(self.password_hash, password)
 
 
+# ---------- PEDAGOGIE ----------
+class Referentiel(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nom = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+
+class Competence(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    referentiel_id = db.Column(db.Integer, db.ForeignKey("referentiel.id"), nullable=False)
+    code = db.Column(db.String(40), nullable=False)
+    nom = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+
+    referentiel = db.relationship("Referentiel", backref=db.backref("competences", cascade="all, delete-orphan"))
+
+
+projet_competence = db.Table(
+    "projet_competence",
+    db.Column("projet_id", db.Integer, db.ForeignKey("projet.id"), primary_key=True),
+    db.Column("competence_id", db.Integer, db.ForeignKey("competence.id"), primary_key=True),
+)
+
+
+atelier_competence = db.Table(
+    "atelier_competence",
+    db.Column("atelier_id", db.Integer, db.ForeignKey("atelier_activite.id"), primary_key=True),
+    db.Column("competence_id", db.Integer, db.ForeignKey("competence.id"), primary_key=True),
+)
+
+
+session_competence = db.Table(
+    "session_competence",
+    db.Column("session_id", db.Integer, db.ForeignKey("session_activite.id"), primary_key=True),
+    db.Column("competence_id", db.Integer, db.ForeignKey("competence.id"), primary_key=True),
+)
+
+
 # ---------- PROJETS ----------
 class Projet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -42,6 +80,11 @@ class Projet(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     subventions = db.relationship("SubventionProjet", back_populates="projet", cascade="all, delete-orphan")
+    competences = db.relationship(
+        "Competence",
+        secondary=projet_competence,
+        backref=db.backref("projets", lazy="dynamic"),
+    )
 
     @property
     def total_demande(self):
@@ -413,6 +456,11 @@ class AtelierActivite(db.Model):
     deleted_at = db.Column(db.DateTime, nullable=True)
 
     sessions = db.relationship("SessionActivite", backref="atelier", cascade="all, delete-orphan")
+    competences = db.relationship(
+        "Competence",
+        secondary=atelier_competence,
+        backref=db.backref("ateliers", lazy="dynamic"),
+    )
 
     def motifs(self):
         try:
@@ -453,6 +501,11 @@ class SessionActivite(db.Model):
     kiosk_opened_at = db.Column(db.DateTime, nullable=True)
 
     presences = db.relationship("PresenceActivite", backref="session", cascade="all, delete-orphan")
+    competences = db.relationship(
+        "Competence",
+        secondary=session_competence,
+        backref=db.backref("sessions", lazy="dynamic"),
+    )
 
 
 class AtelierCapaciteMois(db.Model):
@@ -487,6 +540,27 @@ class PresenceActivite(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("session_id", "participant_id", name="uq_presence_session_participant"),
+    )
+
+
+class Evaluation(db.Model):
+    __tablename__ = "evaluation"
+    id = db.Column(db.Integer, primary_key=True)
+    participant_id = db.Column(db.Integer, db.ForeignKey("participant.id"), nullable=False)
+    competence_id = db.Column(db.Integer, db.ForeignKey("competence.id"), nullable=False)
+    session_id = db.Column(db.Integer, db.ForeignKey("session_activite.id"), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    etat = db.Column(db.Integer, nullable=False, default=0)  # 0=Non acquis, 1=En cours, 2=Acquis, 3=Expert
+    date_evaluation = db.Column(db.Date, nullable=False, default=date.today)
+    commentaire = db.Column(db.Text, nullable=True)
+
+    participant = db.relationship("Participant")
+    competence = db.relationship("Competence")
+    session = db.relationship("SessionActivite")
+    user = db.relationship("User")
+
+    __table_args__ = (
+        db.UniqueConstraint("participant_id", "competence_id", "session_id", name="uq_eval_participant_competence_session"),
     )
 
 
