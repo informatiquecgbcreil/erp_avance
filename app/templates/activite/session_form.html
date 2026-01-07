@@ -47,6 +47,32 @@
 
         <div class="spacer"></div>
 
+        <h3 style="margin-bottom:6px;">Compétences de séance</h3>
+        {% if referentiels %}
+          <div class="grid" style="grid-template-columns:1fr 1fr; gap:12px;">
+            {% for ref in referentiels %}
+              <div class="card" style="background:var(--surface-soft); border-style:dashed;">
+                <strong>{{ ref.nom }}</strong>
+                <div class="muted" style="margin-bottom:6px;">{{ ref.description or '' }}</div>
+                <div class="stack" style="gap:6px;">
+                  {% for comp in ref.competences %}
+                    <label class="row" style="gap:8px; align-items:center;">
+                      <input type="checkbox" name="competence_ids" value="{{ comp.id }}" {% if comp.id in selected_competences %}checked{% endif %}>
+                      <span>{{ comp.code }} · {{ comp.nom }}</span>
+                    </label>
+                  {% else %}
+                    <div class="muted">Aucune compétence dans ce référentiel.</div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="muted">Aucun référentiel configuré. Ajoute-en dans le module pédagogique.</div>
+        {% endif %}
+
+        <div class="spacer"></div>
+
         <div class="row" style="gap:10px; flex-wrap:wrap;">
           <button class="btn" type="submit">Créer</button>
           <a class="btn" href="{{ url_for('activite.sessions', atelier_id=atelier.id) }}">Annuler</a>
