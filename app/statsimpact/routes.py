@@ -22,10 +22,10 @@ from app.models import (
     PresenceActivite,
     SessionActivite,
     Projet,
-    ProjetAtelier,
     Competence,
     Evaluation,
     Referentiel,
+    Objectif,
 )
 
 from app.activite.services.docx_utils import generate_participant_bilan_pdf
@@ -106,6 +106,49 @@ def _build_bilan_rows(participant: Participant) -> list[dict]:
     return rows
 
 
+def _participants_success_rate(session_id: int, competences: list[Competence]) -> dict:
+    if not competences:
+        return {"total": 0, "success": 0, "ratio": 0}
+    presences = PresenceActivite.query.filter_by(session_id=session_id).all()
+    total = len(presences)
+    if total == 0:
+        return {"total": 0, "success": 0, "ratio": 0}
+    comp_ids = [c.id for c in competences]
+    success_count = 0
+    for pr in presences:
+        evals = (
+            Evaluation.query.filter(
+                Evaluation.session_id == session_id,
+                Evaluation.participant_id == pr.participant_id,
+                Evaluation.competence_id.in_(comp_ids),
+                Evaluation.etat >= 2,
+            )
+            .distinct()
+            .count()
+        )
+        if evals == len(comp_ids):
+            success_count += 1
+    ratio = (success_count / total * 100) if total else 0
+    return {"total": total, "success": success_count, "ratio": ratio}
+
+
+def _objective_success(obj: Objectif) -> dict:
+    if obj.type == "operationnel" and obj.session_id:
+        stats = _participants_success_rate(obj.session_id, obj.competences)
+        validated = stats["ratio"] >= (obj.seuil_validation or 0)
+        return {"ratio": stats["ratio"], "validated": validated, "total": stats["total"], "success": stats["success"]}
+
+    enfants = obj.enfants or []
+    if not enfants:
+        return {"ratio": 0, "validated": False, "total": 0, "success": 0}
+    results = [ _objective_success(child) for child in enfants ]
+    total = len(results)
+    success = sum(1 for r in results if r["validated"])
+    ratio = (success / total * 100) if total else 0
+    validated = ratio >= (obj.seuil_validation or 0)
+    return {"ratio": ratio, "validated": validated, "total": total, "success": success}
+
+
 @bp.route("/stats/pedagogie", methods=["GET"])
 @login_required
 def stats_pedagogie():
@@ -138,71 +181,21 @@ def stats_pedagogie():
 
     participant = Participant.query.get(participant_id) if participant_id else None
 
-    projet_stats = []
-    total_participants_projet = 0
+    projet_objectifs = []
     if projet:
-        atelier_ids = [link.atelier_id for link in ProjetAtelier.query.filter_by(projet_id=projet.id).all()]
-        session_ids = []
-        if atelier_ids:
-            session_ids = [
-                s.id
-                for s in SessionActivite.query.filter(SessionActivite.atelier_id.in_(atelier_ids)).all()
-            ]
-        if session_ids:
-            total_participants_projet = (
-                db.session.query(PresenceActivite.participant_id)
-                .filter(PresenceActivite.session_id.in_(session_ids))
-                .distinct()
-                .count()
-            )
-        for comp in projet.competences:
-            acquired_count = 0
-            if session_ids:
-                acquired_count = (
-                    db.session.query(Evaluation.participant_id)
-                    .filter(
-                        Evaluation.session_id.in_(session_ids),
-                        Evaluation.competence_id == comp.id,
-                        Evaluation.etat == 2,
-                    )
-                    .distinct()
-                    .count()
-                )
-            ratio = (acquired_count / total_participants_projet * 100) if total_participants_projet else 0
-            projet_stats.append(
-                {
-                    "competence": comp,
-                    "acquired": acquired_count,
-                    "ratio": ratio,
-                }
-            )
+        objectifs = Objectif.query.filter_by(projet_id=projet.id, type="general").order_by(Objectif.created_at.asc()).all()
+        for obj in objectifs:
+            stats = _objective_success(obj)
+            projet_objectifs.append({"objectif": obj, **stats})
 
     atelier_stats = {}
     if atelier:
-        session_ids = [
-            s.id
-            for s in SessionActivite.query.filter(SessionActivite.atelier_id == atelier.id).all()
-        ]
-        presences_count = 0
-        evaluations_count = 0
-        if session_ids:
-            presences_count = (
-                db.session.query(PresenceActivite)
-                .filter(PresenceActivite.session_id.in_(session_ids))
-                .count()
-            )
-            evaluations_count = (
-                db.session.query(Evaluation)
-                .filter(Evaluation.session_id.in_(session_ids))
-                .count()
-            )
-        coverage = (evaluations_count / presences_count * 100) if presences_count else 0
-        atelier_stats = {
-            "competences": atelier.competences,
-            "presences_count": presences_count,
-            "evaluations_count": evaluations_count,
-            "coverage": coverage,
-        }
+        objectifs = Objectif.query.filter_by(atelier_id=atelier.id, type="specifique").order_by(Objectif.created_at.asc()).all()
+        objectifs_stats = []
+        for obj in objectifs:
+            stats = _objective_success(obj)
+            objectifs_stats.append({"objectif": obj, **stats})
+        atelier_stats = {"objectifs": objectifs_stats}
 
     participant_groups = []
     bilan_rows = []
@@ -223,8 +216,7 @@ def stats_pedagogie():
         projet=projet,
         atelier=atelier,
         participant=participant,
-        projet_stats=projet_stats,
-        total_participants_projet=total_participants_projet,
+        projet_objectifs=projet_objectifs,
         atelier_stats=atelier_stats,
         participant_groups=participant_groups,
     )

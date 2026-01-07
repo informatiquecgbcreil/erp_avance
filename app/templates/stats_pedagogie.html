@@ -28,23 +28,24 @@
 
         {% if projet %}
           <div class="spacer"></div>
-          <p class="muted">Participants uniques (ateliers liés) : {{ total_participants_projet }}</p>
-          {% if projet_stats %}
+          {% if projet_objectifs %}
             <div class="stack">
-              {% for item in projet_stats %}
+              {% for item in projet_objectifs %}
                 <div class="card" style="background:var(--surface-soft); border-style:dashed;">
-                  <strong>{{ item.competence.code }} · {{ item.competence.nom }}</strong>
-                  <div class="muted">Acquis : {{ item.acquired }} / {{ total_participants_projet }}</div>
+                  <strong>{{ item.objectif.titre }}</strong>
+                  <div class="muted">{{ item.objectif.description or '' }}</div>
+                  <div class="muted">Objectifs spécifiques validés : {{ item.success }} / {{ item.total }}</div>
                   <div style="background:var(--surface-strong); border-radius:999px; overflow:hidden; margin-top:8px;">
                     <div style="width:{{ item.ratio|round(0) }}%; background:var(--ok); padding:4px 8px; color:#fff;">
                       {{ item.ratio|round(0) }}%
                     </div>
                   </div>
+                  <div class="muted">Seuil de validation : {{ item.objectif.seuil_validation|round(0) }}%</div>
                 </div>
               {% endfor %}
             </div>
           {% else %}
-            <div class="muted">Aucune compétence définie pour ce projet.</div>
+            <div class="muted">Aucun objectif général défini pour ce projet.</div>
           {% endif %}
         {% endif %}
       </div>
@@ -66,18 +67,21 @@
 
         {% if atelier %}
           <div class="spacer"></div>
-          <p class="muted">Évaluations : {{ atelier_stats.evaluations_count }} · Présences : {{ atelier_stats.presences_count }}</p>
-          <p class="muted">Taux de couverture pédagogique : {{ atelier_stats.coverage|round(1) }}%</p>
-          <div class="spacer"></div>
-          <h3>Compétences travaillées</h3>
           <div class="stack">
-            {% for comp in atelier_stats.competences %}
+            {% for item in atelier_stats.objectifs %}
               <div class="card" style="background:var(--surface-soft); border-style:dashed;">
-                <strong>{{ comp.code }} · {{ comp.nom }}</strong>
-                <div class="muted">{{ comp.description or '' }}</div>
+                <strong>{{ item.objectif.titre }}</strong>
+                <div class="muted">{{ item.objectif.description or '' }}</div>
+                <div class="muted">Objectifs opérationnels validés : {{ item.success }} / {{ item.total }}</div>
+                <div style="background:var(--surface-strong); border-radius:999px; overflow:hidden; margin-top:8px;">
+                  <div style="width:{{ item.ratio|round(0) }}%; background:var(--ok); padding:4px 8px; color:#fff;">
+                    {{ item.ratio|round(0) }}%
+                  </div>
+                </div>
+                <div class="muted">Seuil de validation : {{ item.objectif.seuil_validation|round(0) }}%</div>
               </div>
             {% else %}
-              <div class="muted">Aucune compétence associée à cet atelier.</div>
+              <div class="muted">Aucun objectif spécifique défini pour cet atelier.</div>
             {% endfor %}
           </div>
         {% endif %}

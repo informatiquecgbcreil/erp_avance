@@ -17,9 +17,8 @@ from app.models import (
     Quartier,
     AtelierCapaciteMois,
     ArchiveEmargement,
-    Competence,
     Evaluation,
-    Referentiel,
+    Objectif,
 )
 
 from . import bp
@@ -792,7 +791,8 @@ def emargement(session_id: int):
 
         if action == "bulk_validate":
             eval_date = s.rdv_date or s.date_session or date.today()
-            session_competences = s.competences
+            session_objectifs = Objectif.query.filter_by(session_id=s.id, type="operationnel").all()
+            session_competences = {comp for obj in session_objectifs for comp in obj.competences}
             presences = PresenceActivite.query.filter_by(session_id=session_id).all()
             for pr in presences:
                 for comp in session_competences:
@@ -924,8 +924,16 @@ def emargement(session_id: int):
     participants = Participant.query.order_by(Participant.nom.asc(), Participant.prenom.asc()).limit(500).all()
     motifs = atelier.motifs() or []
     presences = PresenceActivite.query.filter_by(session_id=session_id).order_by(PresenceActivite.created_at.asc()).all()
+    session_objectifs = Objectif.query.filter_by(session_id=s.id, type="operationnel").order_by(Objectif.created_at.asc()).all()
+    objectifs_payload = []
+    for obj in session_objectifs:
+        competences = sorted(
+            obj.competences,
+            key=lambda c: ((c.code or "").lower(), (c.nom or "").lower()),
+        )
+        objectifs_payload.append({"objectif": obj, "competences": competences})
     session_competences = sorted(
-        s.competences,
+        {comp for payload in objectifs_payload for comp in payload["competences"]},
         key=lambda c: ((c.code or "").lower(), (c.nom or "").lower()),
     )
     evaluations = Evaluation.query.filter_by(session_id=s.id).all()
@@ -941,6 +949,7 @@ def emargement(session_id: int):
         motifs=motifs,
         quartiers=quartiers,
         session_competences=session_competences,
+        objectifs_payload=objectifs_payload,
         evaluation_map=evaluation_map,
     )
 

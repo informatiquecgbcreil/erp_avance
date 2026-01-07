@@ -67,6 +67,39 @@ session_competence = db.Table(
 )
 
 
+objectif_competence = db.Table(
+    "objectif_competence",
+    db.Column("objectif_id", db.Integer, db.ForeignKey("objectif.id"), primary_key=True),
+    db.Column("competence_id", db.Integer, db.ForeignKey("competence.id"), primary_key=True),
+)
+
+
+class Objectif(db.Model):
+    __tablename__ = "objectif"
+    id = db.Column(db.Integer, primary_key=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey("objectif.id"), nullable=True)
+    type = db.Column(db.String(30), nullable=False)  # general | specifique | operationnel
+    titre = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    seuil_validation = db.Column(db.Float, nullable=False, default=60.0)
+
+    projet_id = db.Column(db.Integer, db.ForeignKey("projet.id"), nullable=True)
+    atelier_id = db.Column(db.Integer, db.ForeignKey("atelier_activite.id"), nullable=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("session_activite.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    parent = db.relationship("Objectif", remote_side=[id], backref=db.backref("enfants", cascade="all, delete-orphan"))
+    projet = db.relationship("Projet")
+    atelier = db.relationship("AtelierActivite")
+    session = db.relationship("SessionActivite")
+    competences = db.relationship(
+        "Competence",
+        secondary=objectif_competence,
+        backref=db.backref("objectifs", lazy="dynamic"),
+    )
+
+
 # ---------- PROJETS ----------
 class Projet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
