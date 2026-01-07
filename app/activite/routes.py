@@ -17,6 +17,8 @@ from app.models import (
     Quartier,
     AtelierCapaciteMois,
     ArchiveEmargement,
+    Evaluation,
+    Objectif,
 )
 
 from . import bp
@@ -672,6 +674,81 @@ def emargement(session_id: int):
 
     if request.method == "POST":
         action = request.form.get("action")
+        if action == "save_evaluation":
+            participant_id = request.form.get("participant_id")
+            if not participant_id:
+                flash("Participant manquant.", "danger")
+                return redirect(url_for("activite.emargement", session_id=session_id))
+            participant = Participant.query.get(int(participant_id))
+            if not participant:
+                flash("Participant introuvable.", "danger")
+                return redirect(url_for("activite.emargement", session_id=session_id))
+
+            eval_date = s.rdv_date or s.date_session or date.today()
+            competence_ids = [int(cid) for cid in request.form.getlist("competence_ids") if cid.isdigit()]
+            for comp_id in competence_ids:
+                etat = request.form.get(f"etat_{comp_id}")
+                if etat is None:
+                    continue
+                try:
+                    etat_value = int(etat)
+                except ValueError:
+                    continue
+                commentaire = (request.form.get(f"commentaire_{comp_id}") or "").strip() or None
+                evaluation = Evaluation.query.filter_by(
+                    participant_id=participant.id,
+                    competence_id=comp_id,
+                    session_id=s.id,
+                ).first()
+                if evaluation:
+                    evaluation.etat = etat_value
+                    evaluation.commentaire = commentaire
+                    evaluation.user_id = current_user.id
+                    evaluation.date_evaluation = eval_date
+                else:
+                    evaluation = Evaluation(
+                        participant_id=participant.id,
+                        competence_id=comp_id,
+                        session_id=s.id,
+                        user_id=current_user.id,
+                        etat=etat_value,
+                        date_evaluation=eval_date,
+                        commentaire=commentaire,
+                    )
+                    db.session.add(evaluation)
+            db.session.commit()
+            flash("Évaluation enregistrée.", "success")
+            return redirect(url_for("activite.emargement", session_id=session_id, highlight=participant.id))
+
+        if action == "bulk_validate":
+            eval_date = s.rdv_date or s.date_session or date.today()
+            session_objectifs = Objectif.query.filter_by(session_id=s.id, type="operationnel").all()
+            session_competences = {comp for obj in session_objectifs for comp in obj.competences}
+            presences = PresenceActivite.query.filter_by(session_id=session_id).all()
+            for pr in presences:
+                for comp in session_competences:
+                    evaluation = Evaluation.query.filter_by(
+                        participant_id=pr.participant_id,
+                        competence_id=comp.id,
+                        session_id=s.id,
+                    ).first()
+                    if evaluation:
+                        evaluation.etat = 2
+                        evaluation.user_id = current_user.id
+                        evaluation.date_evaluation = eval_date
+                    else:
+                        db.session.add(Evaluation(
+                            participant_id=pr.participant_id,
+                            competence_id=comp.id,
+                            session_id=s.id,
+                            user_id=current_user.id,
+                            etat=2,
+                            date_evaluation=eval_date,
+                        ))
+            db.session.commit()
+            flash("Évaluation rapide appliquée.", "success")
+            return redirect(url_for("activite.emargement", session_id=session_id))
+
         if action == "add_participant":
             nom = (request.form.get("nom") or "").strip()
             prenom = (request.form.get("prenom") or "").strip()
@@ -778,6 +855,20 @@ def emargement(session_id: int):
     participants = Participant.query.order_by(Participant.nom.asc(), Participant.prenom.asc()).limit(500).all()
     motifs = atelier.motifs() or []
     presences = PresenceActivite.query.filter_by(session_id=session_id).order_by(PresenceActivite.created_at.asc()).all()
+    session_objectifs = Objectif.query.filter_by(session_id=s.id, type="operationnel").order_by(Objectif.created_at.asc()).all()
+    objectifs_payload = []
+    for obj in session_objectifs:
+        competences = sorted(
+            obj.competences,
+            key=lambda c: ((c.code or "").lower(), (c.nom or "").lower()),
+        )
+        objectifs_payload.append({"objectif": obj, "competences": competences})
+    session_competences = sorted(
+        {comp for payload in objectifs_payload for comp in payload["competences"]},
+        key=lambda c: ((c.code or "").lower(), (c.nom or "").lower()),
+    )
+    evaluations = Evaluation.query.filter_by(session_id=s.id).all()
+    evaluation_map = {(e.participant_id, e.competence_id): e for e in evaluations}
 
     return render_template(
         "activite/emargement.html",
@@ -788,6 +879,9 @@ def emargement(session_id: int):
         presences=presences,
         motifs=motifs,
         quartiers=quartiers,
+        session_competences=session_competences,
+        objectifs_payload=objectifs_payload,
+        evaluation_map=evaluation_map,
     )
 
 
@@ -1247,4 +1341,3 @@ def finalize_individuel(atelier_id: int, annee: int, mois: int):
         return send_file(out_docx, as_attachment=True)
     flash("Finalisation échouée.", "danger")
     return redirect(url_for("activite.sessions", atelier_id=atelier_id))
-

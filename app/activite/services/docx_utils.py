@@ -364,3 +364,54 @@ def generate_individuel_mensuel_docx(app, atelier, annee: int, mois: int) -> str
 def finalize_individuel_mensuel_pdf(app, atelier, annee: int, mois: int) -> str | None:
     docx_path = generate_individuel_mensuel_docx(app, atelier, annee, mois)
     return _try_docx_to_pdf(docx_path)
+
+
+def generate_participant_bilan_docx(app, participant, rows: list[dict]) -> str:
+    folder = os.path.join(app.instance_path, "archives_pedagogie")
+    os.makedirs(folder, exist_ok=True)
+    fname = f"bilan_{participant.id}_{_safe_filename(participant.nom)}_{_safe_filename(participant.prenom)}.docx"
+    out_docx = os.path.join(folder, fname)
+
+    template_path = os.path.join(app.instance_path, "docx_templates", "bilan_pedagogique.docx")
+
+    if DocxTemplate and os.path.exists(template_path):
+        tpl = DocxTemplate(template_path)
+        context = {
+            "participant": {
+                "nom": participant.nom,
+                "prenom": participant.prenom,
+                "email": participant.email or "",
+                "ville": participant.ville or "",
+            },
+            "rows": rows,
+            "date": date.today().strftime("%d/%m/%Y"),
+        }
+        tpl.render(context)
+        tpl.save(out_docx)
+    else:
+        doc = Document(template_path) if template_path and os.path.exists(template_path) else Document()
+        doc.add_heading("Bilan pédagogique", level=1)
+        doc.add_paragraph(f"Participant : {participant.nom} {participant.prenom}")
+        if participant.email:
+            doc.add_paragraph(f"Email : {participant.email}")
+        if participant.ville:
+            doc.add_paragraph(f"Ville : {participant.ville}")
+        doc.add_paragraph(f"Date : {date.today().strftime('%d/%m/%Y')}")
+        table = doc.add_table(rows=1, cols=4)
+        headers = ["Référentiel", "Compétence", "Date", "Atelier"]
+        for i, h in enumerate(headers):
+            table.cell(0, i).text = h
+        for r in rows:
+            row = table.add_row().cells
+            row[0].text = r.get("referentiel", "")
+            row[1].text = r.get("competence", "")
+            row[2].text = r.get("date", "")
+            row[3].text = r.get("atelier", "")
+        doc.save(out_docx)
+
+    return out_docx
+
+
+def generate_participant_bilan_pdf(app, participant, rows: list[dict]) -> str | None:
+    docx_path = generate_participant_bilan_docx(app, participant, rows)
+    return _try_docx_to_pdf(docx_path)
