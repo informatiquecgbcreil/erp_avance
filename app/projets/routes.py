@@ -6,7 +6,16 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from app.extensions import db
-from app.models import Projet, Subvention, SubventionProjet, AtelierActivite, ProjetAtelier, ProjetIndicateur
+from app.models import (
+    Projet,
+    Subvention,
+    SubventionProjet,
+    AtelierActivite,
+    ProjetAtelier,
+    ProjetIndicateur,
+    Competence,
+    Referentiel,
+)
 
 bp = Blueprint("projets", __name__)
 
@@ -141,6 +150,16 @@ def projets_edit(projet_id):
 
             db.session.commit()
             flash("Projet modifié.", "success")
+            return redirect(url_for("projets.projets_edit", projet_id=p.id))
+
+        if action == "update_competences":
+            competence_ids = [int(cid) for cid in request.form.getlist("competence_ids") if cid.isdigit()]
+            if competence_ids:
+                p.competences = Competence.query.filter(Competence.id.in_(competence_ids)).all()
+            else:
+                p.competences = []
+            db.session.commit()
+            flash("Compétences du projet mises à jour.", "success")
             return redirect(url_for("projets.projets_edit", projet_id=p.id))
 
         if action == "upload_cr":
@@ -345,6 +364,8 @@ def projets_edit(projet_id):
     linked_ateliers = set(link.atelier_id for link in ProjetAtelier.query.filter_by(projet_id=p.id).all())
 
     indicateurs = ProjetIndicateur.query.filter_by(projet_id=p.id).order_by(ProjetIndicateur.created_at.asc()).all()
+    referentiels = Referentiel.query.order_by(Referentiel.nom.asc()).all()
+    selected_competences = {c.id for c in p.competences}
 
     return render_template(
         "projets_edit.html",
@@ -358,6 +379,8 @@ def projets_edit(projet_id):
         indicator_packs=INDICATOR_PACKS,
         period_choices=PERIOD_CHOICES,
         target_op_choices=TARGET_OP_CHOICES,
+        referentiels=referentiels,
+        selected_competences=selected_competences,
     )
 
 @bp.route("/projets/cr/<int:projet_id>/download")
