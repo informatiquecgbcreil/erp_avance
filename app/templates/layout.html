@@ -307,6 +307,7 @@
       font-weight:700;
     }
   </style>
+  {% block head_extra %}{% endblock %}
 </head>
 
   <body>
@@ -328,6 +329,7 @@
             <a class="pill {% if ep.startswith('participants.') %}active{% endif %}" href="{{ url_for('participants.list_participants') }}">Participants</a>
             <a class="pill {% if ep.startswith('inventaire_materiel.') %}active{% endif %}" href="{{ url_for('inventaire_materiel.list_items') }}">Inventaire</a>
             <a class="pill {% if ep.startswith('activite.') or ep.startswith('kiosk.') %}active{% endif %}" href="{{ url_for('activite.index') }}">Émargement</a>
+            <a class="pill {% if ep.startswith('pedagogie.') or ep.startswith('statsimpact.stats_pedagogie') %}active{% endif %}" href="{{ url_for('pedagogie.referentiels_list') }}">Pédagogie</a>
 			<a class="pill {% if ep.startswith('main.stats_bilans') or ep.startswith('main.bilan_global') or ep.startswith('main.stats') %}active{% endif %}" href="{{ url_for('main.stats_bilans') }}">Stats &amp; bilans</a>
             <a class="pill {% if ep.startswith('statsimpact.') %}active{% endif %}" href="{{ url_for('statsimpact.dashboard') }}">Données ateliers</a>
             <a class="pill {% if ep.startswith('main.controle') %}active{% endif %}" href="{{ url_for('main.controle') }}">Contrôle</a>
@@ -395,5 +397,6 @@
     });
   })();
   </script>
+  {% block scripts_extra %}{% endblock %}
 </body>
 </html>

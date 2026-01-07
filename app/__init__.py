@@ -49,6 +49,7 @@ def create_app():
     from app.inventaire_materiel.routes import bp as inventaire_materiel_bp
     from app.participants.routes import bp as participants_bp
     from app.launcher import bp as launcher_bp
+    from app.pedagogie.routes import bp as pedagogie_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -62,6 +63,7 @@ def create_app():
     app.register_blueprint(inventaire_materiel_bp)
     app.register_blueprint(participants_bp)
     app.register_blueprint(launcher_bp)
+    app.register_blueprint(pedagogie_bp)
 
 
     def ensure_schema():

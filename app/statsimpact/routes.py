@@ -15,7 +15,20 @@ from openpyxl.utils import get_column_letter
 
 from app.extensions import db
 
-from app.models import AtelierActivite, Participant, Quartier, PresenceActivite, SessionActivite
+from app.models import (
+    AtelierActivite,
+    Participant,
+    Quartier,
+    PresenceActivite,
+    SessionActivite,
+    Projet,
+    Competence,
+    Evaluation,
+    Referentiel,
+    Objectif,
+)
+
+from app.activite.services.docx_utils import generate_participant_bilan_pdf
 
 from .occupancy import compute_occupancy_stats
 
@@ -51,6 +64,176 @@ def _safe_sheet_title(name: str, fallback: str = "Atelier") -> str:
     cleaned = "".join(c for c in name if c not in bad).strip()
     cleaned = cleaned[:31] if cleaned else fallback
     return cleaned
+
+
+def _pedago_scope_secteur() -> str | None:
+    role = getattr(current_user, "role", None)
+    if role == "responsable_secteur":
+        return (getattr(current_user, "secteur_assigne", None) or "").strip() or None
+    return None
+
+
+def _build_bilan_rows(participant: Participant) -> list[dict]:
+    eval_rows = (
+        db.session.query(
+            Evaluation,
+            Competence,
+            Referentiel,
+            SessionActivite,
+            AtelierActivite,
+        )
+        .join(Competence, Evaluation.competence_id == Competence.id)
+        .join(Referentiel, Competence.referentiel_id == Referentiel.id)
+        .outerjoin(SessionActivite, Evaluation.session_id == SessionActivite.id)
+        .outerjoin(AtelierActivite, SessionActivite.atelier_id == AtelierActivite.id)
+        .filter(Evaluation.participant_id == participant.id, Evaluation.etat == 2)
+        .order_by(Referentiel.nom.asc(), Competence.code.asc(), Evaluation.date_evaluation.asc())
+        .all()
+    )
+
+    rows: list[dict] = []
+    for eval_obj, comp, ref, session, atelier in eval_rows:
+        date_label = eval_obj.date_evaluation.strftime("%d/%m/%Y") if eval_obj.date_evaluation else ""
+        atelier_label = atelier.nom if atelier else ""
+        rows.append(
+            {
+                "referentiel": ref.nom,
+                "competence": f"{comp.code} · {comp.nom}",
+                "date": date_label,
+                "atelier": atelier_label,
+            }
+        )
+    return rows
+
+
+def _participants_success_rate(session_id: int, competences: list[Competence]) -> dict:
+    if not competences:
+        return {"total": 0, "success": 0, "ratio": 0}
+    presences = PresenceActivite.query.filter_by(session_id=session_id).all()
+    total = len(presences)
+    if total == 0:
+        return {"total": 0, "success": 0, "ratio": 0}
+    comp_ids = [c.id for c in competences]
+    success_count = 0
+    for pr in presences:
+        evals = (
+            Evaluation.query.filter(
+                Evaluation.session_id == session_id,
+                Evaluation.participant_id == pr.participant_id,
+                Evaluation.competence_id.in_(comp_ids),
+                Evaluation.etat >= 2,
+            )
+            .distinct()
+            .count()
+        )
+        if evals == len(comp_ids):
+            success_count += 1
+    ratio = (success_count / total * 100) if total else 0
+    return {"total": total, "success": success_count, "ratio": ratio}
+
+
+def _objective_success(obj: Objectif) -> dict:
+    if obj.type == "operationnel" and obj.session_id:
+        stats = _participants_success_rate(obj.session_id, obj.competences)
+        validated = stats["ratio"] >= (obj.seuil_validation or 0)
+        return {"ratio": stats["ratio"], "validated": validated, "total": stats["total"], "success": stats["success"]}
+
+    enfants = obj.enfants or []
+    if not enfants:
+        return {"ratio": 0, "validated": False, "total": 0, "success": 0}
+    results = [ _objective_success(child) for child in enfants ]
+    total = len(results)
+    success = sum(1 for r in results if r["validated"])
+    ratio = (success / total * 100) if total else 0
+    validated = ratio >= (obj.seuil_validation or 0)
+    return {"ratio": ratio, "validated": validated, "total": total, "success": success}
+
+
+@bp.route("/stats/pedagogie", methods=["GET"])
+@login_required
+def stats_pedagogie():
+    if not _can_view():
+        abort(403)
+
+    secteur = _pedago_scope_secteur()
+
+    projets_q = Projet.query
+    ateliers_q = AtelierActivite.query.filter(AtelierActivite.is_deleted.is_(False))
+    if secteur:
+        projets_q = projets_q.filter(Projet.secteur == secteur)
+        ateliers_q = ateliers_q.filter(AtelierActivite.secteur == secteur)
+
+    projets = projets_q.order_by(Projet.secteur.asc(), Projet.nom.asc()).all()
+    ateliers = ateliers_q.order_by(AtelierActivite.secteur.asc(), AtelierActivite.nom.asc()).all()
+    participants = Participant.query.order_by(Participant.nom.asc(), Participant.prenom.asc()).all()
+
+    projet_id = request.args.get("projet_id", type=int)
+    atelier_id = request.args.get("atelier_id", type=int)
+    participant_id = request.args.get("participant_id", type=int)
+
+    projet = Projet.query.get(projet_id) if projet_id else None
+    if projet and secteur and projet.secteur != secteur:
+        abort(403)
+
+    atelier = AtelierActivite.query.get(atelier_id) if atelier_id else None
+    if atelier and secteur and atelier.secteur != secteur:
+        abort(403)
+
+    participant = Participant.query.get(participant_id) if participant_id else None
+
+    projet_objectifs = []
+    if projet:
+        objectifs = Objectif.query.filter_by(projet_id=projet.id, type="general").order_by(Objectif.created_at.asc()).all()
+        for obj in objectifs:
+            stats = _objective_success(obj)
+            projet_objectifs.append({"objectif": obj, **stats})
+
+    atelier_stats = {}
+    if atelier:
+        objectifs = Objectif.query.filter_by(atelier_id=atelier.id, type="specifique").order_by(Objectif.created_at.asc()).all()
+        objectifs_stats = []
+        for obj in objectifs:
+            stats = _objective_success(obj)
+            objectifs_stats.append({"objectif": obj, **stats})
+        atelier_stats = {"objectifs": objectifs_stats}
+
+    participant_groups = []
+    bilan_rows = []
+    if participant:
+        bilan_rows = _build_bilan_rows(participant)
+        grouped: dict[str, list[dict]] = {}
+        for row in bilan_rows:
+            grouped.setdefault(row["referentiel"], []).append(row)
+        participant_groups = [
+            {"referentiel": ref, "rows": rows} for ref, rows in grouped.items()
+        ]
+
+    return render_template(
+        "stats_pedagogie.html",
+        projets=projets,
+        ateliers=ateliers,
+        participants=participants,
+        projet=projet,
+        atelier=atelier,
+        participant=participant,
+        projet_objectifs=projet_objectifs,
+        atelier_stats=atelier_stats,
+        participant_groups=participant_groups,
+    )
+
+
+@bp.route("/stats/pedagogie/participant/<int:participant_id>/bilan", methods=["GET"])
+@login_required
+def stats_pedagogie_bilan(participant_id: int):
+    if not _can_view():
+        abort(403)
+    participant = Participant.query.get_or_404(participant_id)
+    rows = _build_bilan_rows(participant)
+    pdf_path = generate_participant_bilan_pdf(current_app, participant, rows)
+    if pdf_path and os.path.exists(pdf_path):
+        return send_file(pdf_path, as_attachment=True)
+    flash("Impossible de générer le PDF.", "warning")
+    return redirect(url_for("statsimpact.stats_pedagogie", participant_id=participant_id))
 
 
 def _build_magato_per_atelier_workbook(flt) -> Workbook:
