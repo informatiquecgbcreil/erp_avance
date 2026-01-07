@@ -54,6 +54,10 @@ def _ensure_seed_quartiers():
     db.session.commit()
 
 
+def _load_referentiels():
+    return Referentiel.query.order_by(Referentiel.nom.asc()).all()
+
+
 def _ensure_seed_ateliers(secteur: str):
     """Seed minimal ateliers for a smoother IRL start.
 
@@ -319,7 +323,14 @@ def atelier_new():
         nom = (request.form.get("nom") or "").strip()
         if not nom:
             flash("Nom d'atelier obligatoire.", "danger")
-            return render_template("activite/atelier_form.html", secteur=secteur, atelier=None)
+            referentiels = _load_referentiels()
+            return render_template(
+                "activite/atelier_form.html",
+                secteur=secteur,
+                atelier=None,
+                referentiels=referentiels,
+                selected_competences=set(),
+            )
 
         type_atelier = request.form.get("type_atelier") or "COLLECTIF"
         description = (request.form.get("description") or "").strip() or None
@@ -345,12 +356,22 @@ def atelier_new():
             duree_defaut_minutes=int(duree_defaut_minutes) if duree_defaut_minutes else None,
             motifs_json=motifs_json,
         )
+        competence_ids = [int(cid) for cid in request.form.getlist("competence_ids") if cid.isdigit()]
+        if competence_ids:
+            a.competences = Competence.query.filter(Competence.id.in_(competence_ids)).all()
         db.session.add(a)
         db.session.commit()
         flash("Atelier créé.", "success")
         return redirect(url_for("activite.index"))
 
-    return render_template("activite/atelier_form.html", secteur=secteur, atelier=None)
+    referentiels = _load_referentiels()
+    return render_template(
+        "activite/atelier_form.html",
+        secteur=secteur,
+        atelier=None,
+        referentiels=referentiels,
+        selected_competences=set(),
+    )
 
 
 
@@ -389,12 +410,27 @@ def atelier_edit(atelier_id: int):
         else:
             atelier.motifs_json = None
 
+        competence_ids = [int(cid) for cid in request.form.getlist("competence_ids") if cid.isdigit()]
+        if competence_ids:
+            atelier.competences = Competence.query.filter(Competence.id.in_(competence_ids)).all()
+        else:
+            atelier.competences = []
+
         db.session.commit()
         flash("Atelier mis à jour.", "success")
         return redirect(url_for("activite.index"))
 
     motifs_str = "; ".join(atelier.motifs() or [])
-    return render_template("activite/atelier_form.html", secteur=secteur, atelier=atelier, motifs_str=motifs_str)
+    referentiels = _load_referentiels()
+    selected_competences = {c.id for c in atelier.competences}
+    return render_template(
+        "activite/atelier_form.html",
+        secteur=secteur,
+        atelier=atelier,
+        motifs_str=motifs_str,
+        referentiels=referentiels,
+        selected_competences=selected_competences,
+    )
 
 
 @bp.route("/atelier/<int:atelier_id>/sessions")
@@ -618,7 +654,16 @@ def session_new(atelier_id: int):
             rdv_fin = (request.form.get("rdv_fin") or "").strip() or None
             if not rdv_date:
                 flash("Date RDV obligatoire.", "danger")
-                return render_template("activite/session_form.html", secteur=secteur, atelier=atelier, session=None)
+                referentiels = _load_referentiels()
+                selected_competences = {c.id for c in atelier.competences}
+                return render_template(
+                    "activite/session_form.html",
+                    secteur=secteur,
+                    atelier=atelier,
+                    session=None,
+                    referentiels=referentiels,
+                    selected_competences=selected_competences,
+                )
             rdv_date_obj = datetime.strptime(rdv_date, "%Y-%m-%d").date()
             s = SessionActivite(
                 atelier_id=atelier.id,
@@ -636,7 +681,16 @@ def session_new(atelier_id: int):
             capacite = request.form.get("capacite") or atelier.capacite_defaut
             if not date_session:
                 flash("Date de session obligatoire.", "danger")
-                return render_template("activite/session_form.html", secteur=secteur, atelier=atelier, session=None)
+                referentiels = _load_referentiels()
+                selected_competences = {c.id for c in atelier.competences}
+                return render_template(
+                    "activite/session_form.html",
+                    secteur=secteur,
+                    atelier=atelier,
+                    session=None,
+                    referentiels=referentiels,
+                    selected_competences=selected_competences,
+                )
             date_obj = datetime.strptime(date_session, "%Y-%m-%d").date()
             s = SessionActivite(
                 atelier_id=atelier.id,
@@ -648,12 +702,27 @@ def session_new(atelier_id: int):
                 capacite=int(capacite) if capacite else None,
             )
 
+        competence_ids = [int(cid) for cid in request.form.getlist("competence_ids") if cid.isdigit()]
+        if competence_ids:
+            s.competences = Competence.query.filter(Competence.id.in_(competence_ids)).all()
+        else:
+            s.competences = []
+
         db.session.add(s)
         db.session.commit()
         flash("Session créée.", "success")
         return redirect(url_for("activite.emargement", session_id=s.id))
 
-    return render_template("activite/session_form.html", secteur=secteur, atelier=atelier, session=None)
+    referentiels = _load_referentiels()
+    selected_competences = {c.id for c in atelier.competences}
+    return render_template(
+        "activite/session_form.html",
+        secteur=secteur,
+        atelier=atelier,
+        session=None,
+        referentiels=referentiels,
+        selected_competences=selected_competences,
+    )
 
 
 @bp.route("/session/<int:session_id>/emargement", methods=["GET", "POST"])
