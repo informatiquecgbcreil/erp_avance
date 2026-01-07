@@ -2,7 +2,7 @@ from flask import render_template, request, redirect, url_for, flash
 from flask_login import login_required
 
 from app.extensions import db
-from app.models import Referentiel, Competence, Objectif, Projet, AtelierActivite, SessionActivite
+from app.models import Referentiel, Competence, Objectif, Projet, AtelierActivite, SessionActivite, PresenceActivite, Evaluation
 
 from . import bp
 
@@ -154,6 +154,52 @@ def objectifs():
         objectifs = objectifs.filter(Objectif.session_id == session_id)
     objectifs = objectifs.order_by(Objectif.created_at.asc()).all()
 
+    def _participants_success_rate(session_id: int, competences: list[Competence]) -> dict:
+        if not competences:
+            return {"total": 0, "success": 0, "ratio": 0}
+        presences = PresenceActivite.query.filter_by(session_id=session_id).all()
+        total = len(presences)
+        if total == 0:
+            return {"total": 0, "success": 0, "ratio": 0}
+        comp_ids = [c.id for c in competences]
+        success_count = 0
+        for pr in presences:
+            evals = (
+                Evaluation.query.filter(
+                    Evaluation.session_id == session_id,
+                    Evaluation.participant_id == pr.participant_id,
+                    Evaluation.competence_id.in_(comp_ids),
+                    Evaluation.etat >= 2,
+                )
+                .distinct()
+                .count()
+            )
+            if evals == len(comp_ids):
+                success_count += 1
+        ratio = (success_count / total * 100) if total else 0
+        return {"total": total, "success": success_count, "ratio": ratio}
+
+    def _objective_success(obj: Objectif) -> dict:
+        if obj.type == "operationnel" and obj.session_id:
+            stats = _participants_success_rate(obj.session_id, obj.competences)
+            validated = stats["ratio"] >= (obj.seuil_validation or 0)
+            return {"ratio": stats["ratio"], "validated": validated, "total": stats["total"], "success": stats["success"]}
+
+        enfants = obj.enfants or []
+        if not enfants:
+            return {"ratio": 0, "validated": False, "total": 0, "success": 0}
+        results = [_objective_success(child) for child in enfants]
+        total = len(results)
+        success = sum(1 for r in results if r["validated"])
+        ratio = (success / total * 100) if total else 0
+        validated = ratio >= (obj.seuil_validation or 0)
+        return {"ratio": ratio, "validated": validated, "total": total, "success": success}
+
+    objectifs_stats = []
+    for obj in objectifs:
+        stats = _objective_success(obj)
+        objectifs_stats.append({"objectif": obj, **stats})
+
     parent_options = Objectif.query.order_by(Objectif.created_at.asc()).all()
 
     return render_template(
@@ -162,7 +208,7 @@ def objectifs():
         ateliers=ateliers,
         sessions=sessions,
         referentiels=referentiels,
-        objectifs=objectifs,
+        objectifs=objectifs_stats,
         parent_options=parent_options,
         projet_id=projet_id,
         atelier_id=atelier_id,

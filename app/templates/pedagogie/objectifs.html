@@ -140,22 +140,31 @@
             </tr>
           </thead>
           <tbody>
-            {% for obj in objectifs %}
+            {% for item in objectifs %}
               <tr>
-                <td><span class="badge">{{ obj.type }}</span></td>
-                <td><strong>{{ obj.titre }}</strong><div class="muted">{{ obj.description or '' }}</div></td>
-                <td>{{ obj.seuil_validation|round(0) }}%</td>
-                <td class="muted">
-                  {% if obj.projet %}Projet : {{ obj.projet.nom }}<br>{% endif %}
-                  {% if obj.atelier %}Atelier : {{ obj.atelier.nom }}<br>{% endif %}
-                  {% if obj.session %}Session : {{ obj.session.date_session or obj.session.rdv_date }}{% endif %}
+                <td><span class="badge">{{ item.objectif.type }}</span></td>
+                <td>
+                  <strong>{{ item.objectif.titre }}</strong>
+                  <div class="muted">{{ item.objectif.description or '' }}</div>
+                  <div class="muted">Validés : {{ item.success }} / {{ item.total }}</div>
+                  <div style="background:var(--surface-strong); border-radius:999px; overflow:hidden; margin-top:6px;">
+                    <div style="width:{{ item.ratio|round(0) }}%; background:var(--ok); padding:2px 8px; color:#fff;">
+                      {{ item.ratio|round(0) }}%
+                    </div>
+                  </div>
                 </td>
-                <td class="muted">{{ obj.parent.titre if obj.parent else '—' }}</td>
+                <td>{{ item.objectif.seuil_validation|round(0) }}%</td>
+                <td class="muted">
+                  {% if item.objectif.projet %}Projet : {{ item.objectif.projet.nom }}<br>{% endif %}
+                  {% if item.objectif.atelier %}Atelier : {{ item.objectif.atelier.nom }}<br>{% endif %}
+                  {% if item.objectif.session %}Session : {{ item.objectif.session.date_session or item.objectif.session.rdv_date }}{% endif %}
+                </td>
+                <td class="muted">{{ item.objectif.parent.titre if item.objectif.parent else '—' }}</td>
                 <td>
                   <form method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="action" value="delete_objectif">
-                    <input type="hidden" name="objectif_id" value="{{ obj.id }}">
+                    <input type="hidden" name="objectif_id" value="{{ item.objectif.id }}">
                     <button class="btn danger" type="submit">Supprimer</button>
                   </form>
                 </td>
